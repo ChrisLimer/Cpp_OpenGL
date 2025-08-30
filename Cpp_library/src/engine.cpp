@@ -74,12 +74,127 @@ void main(){
 }
 )GLSL";
 
+
+// minimal shader for solid color triangles with alpha
+static const char* kTriVS = R"GLSL(
+#version 450 core
+layout(location=0) in vec3 aPos;
+uniform mat4 uMVP;
+void main(){ gl_Position = uMVP * vec4(aPos, 1.0); }
+)GLSL";
+
+static const char* kTriFS = R"GLSL(
+#version 450 core
+out vec4 FragColor;
+uniform vec4 uColor;
+void main(){ FragColor = uColor; }
+)GLSL";
+
+
+
+// forward decl from loader file
+static Mesh load_obj_positions_only(const std::string& path);
+
+void render_obj(const std::string& obj_path, const Camera& cam, const RenderConfig& cfg, const RGBA& color){
+    // 1) load mesh
+    Mesh mesh = load_obj_positions_only(obj_path);
+    if (mesh.indices.empty()) throw std::runtime_error("OBJ has no triangles after load: " + obj_path);
+
+    // 2) window/context
+    if (!glfwInit()) throw std::runtime_error("Failed to init GLFW");
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    GLFWwindow* win = glfwCreateWindow(cfg.width, cfg.height, "Cpp_OpenGL OBJ", nullptr, nullptr);
+    if (!win){ glfwTerminate(); throw std::runtime_error("Failed to create window"); }
+    glfwMakeContextCurrent(win);
+    glfwSwapInterval(1);
+
+    // 3) glad
+    // #if __has_include(<glad/gl.h>)
+    #if CPP_GLAD_V2
+        if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) { glfwDestroyWindow(win); glfwTerminate(); throw std::runtime_error("Failed to load OpenGL"); }
+    // #elif __has_include(<glad/glad.h>)
+    #elif CPP_GLAD_V1
+        if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { glfwDestroyWindow(win); glfwTerminate(); throw std::runtime_error("Failed to load OpenGL"); }
+    #endif
+
+    // 4) GL state
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE); // see both sides for translucent demo
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // 5) program + buffers
+    GLuint vs = compile(GL_VERTEX_SHADER, kTriVS);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, kTriFS);
+    GLuint prog = link(vs, fs);
+    glUseProgram(prog);
+
+    GLuint vao=0, vbo=0, ebo=0;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, mesh.positions.size()*sizeof(float), mesh.positions.data(), GL_STATIC_DRAW);
+
+    glGenBuffers(1, &ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size()*sizeof(uint32_t), mesh.indices.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*3, (void*)0);
+
+    GLint locMVP = glGetUniformLocation(prog, "uMVP");
+    GLint locCol = glGetUniformLocation(prog, "uColor");
+
+    // 6) camera matrices (GLM)
+    int fb_w, fb_h; glfwGetFramebufferSize(win, &fb_w, &fb_h);
+    float aspect = (float)fb_w / (float)fb_h;
+    glm::mat4 P = glm::perspective(glm::radians(cam.fov_deg), aspect, cam.near_plane, cam.far_plane);
+    glm::mat4 V = glm::lookAt(glm::vec3(cam.eye.x, cam.eye.y, cam.eye.z),
+                              glm::vec3(cam.center.x, cam.center.y, cam.center.z),
+                              glm::vec3(cam.up.x, cam.up.y, cam.up.z));
+
+    glUniform4f(locCol, color.r, color.g, color.b, color.a);
+
+    while (!glfwWindowShouldClose(win)){
+        glfwPollEvents();
+        glfwGetFramebufferSize(win, &fb_w, &fb_h);
+        glViewport(0,0,fb_w,fb_h);
+        glClearColor(cfg.bg_r, cfg.bg_g, cfg.bg_b, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        float a = (float)fb_w / (float)fb_h;
+        P = glm::perspective(glm::radians(cam.fov_deg), a, cam.near_plane, cam.far_plane);
+        glm::mat4 VP = P * V;
+        glUniformMatrix4fv(locMVP, 1, GL_FALSE, glm::value_ptr(VP));
+
+        glBindVertexArray(vao);
+        glDrawElements(GL_TRIANGLES, (GLsizei)mesh.indices.size(), GL_UNSIGNED_INT, 0);
+
+        glfwSwapBuffers(win);
+        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, 1);
+    }
+
+    glDeleteBuffers(1, &ebo);
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteProgram(prog);
+
+    glfwDestroyWindow(win);
+    glfwTerminate();
+}
+
+
+
 void render_scatter(std::span<const float> points, const Camera& cam, const RenderConfig& cfg){
     if (points.size() % 3 != 0) throw std::runtime_error("points must be N*3 floats");
     size_t count = points.size()/3;
 
 
-    glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f); 
+    // glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f); 
 
     if (!glfwInit()) throw std::runtime_error("Failed to init GLFW");
 
@@ -196,3 +311,5 @@ void render_scatter(std::span<const float> points, const Camera& cam, const Rend
 }
 
 } // namespace cpp_core
+
+

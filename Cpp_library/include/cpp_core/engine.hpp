@@ -8,13 +8,6 @@
 
 namespace cpp_core {
 
-
-// Load an .obj from disk and render with a translucent color
-void render_obj(const std::string& obj_path,
-                const Camera& cam,
-                const RenderConfig& cfg = {},
-                const RGBA& color = RGBA{100.f/255.f, 100.f/255.f, 200.f/255.f, 125.f/255.f});
-
 struct Vec3 { float x, y, z; };
 
 struct Camera {
@@ -33,6 +26,13 @@ struct RenderConfig {
     float bg_r = 0.05f, bg_g = 0.05f, bg_b = 0.08f;
     float color_r = 1.0f, color_g = 1.0f, color_b = 1.0f;
 };
+
+// Load an .obj from disk and render with a translucent color
+void render_obj(const std::string& obj_path,
+                const Camera& cam,
+                const RenderConfig& cfg = {},
+                const RGBA& color = RGBA{100.f/255.f, 100.f/255.f, 200.f/255.f, 125.f/255.f});
+
 
 // Simple one-shot function: opens a window, renders until it’s closed.
 // `points` is a contiguous array of length N*3 (xyz, float32).
